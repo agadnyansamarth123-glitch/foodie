@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import supabase from "../services/supabase";
 import { getCurrentUserProfile, getProfileByUserId } from "../services/profiles";
+import { toggleLike } from "../services/likes";
 import PostCard from "../components/PostCard";
 
 const MOCK_NAMES = {
@@ -22,6 +23,7 @@ function Profile() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
@@ -30,8 +32,44 @@ function Profile() {
   const [postsError, setPostsError] = useState("");
 
   const isOtherUser = Boolean(id);
-  const isUuidParam = isUuid(id);
+  const isUuidParam = isOtherUser && isUuid(id);
   const isDemoStoryId = isOtherUser && !isUuidParam;
+
+  const handleLikeToggle = async (postId) => {
+    if (!currentUserId) return;
+
+    // Optimistically update the UI
+    setMyPosts((prevPosts) =>
+      prevPosts.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              isLiked: !post.isLiked,
+              likeCount: post.isLiked ? post.likeCount - 1 : post.likeCount + 1,
+            }
+          : post
+      )
+    );
+
+    // Call the API
+    const { liked, error } = await toggleLike(postId);
+
+    if (error) {
+      // Revert on error
+      setMyPosts((prevPosts) =>
+        prevPosts.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                isLiked: !post.isLiked,
+                likeCount: post.isLiked ? post.likeCount - 1 : post.likeCount + 1,
+              }
+            : post
+        )
+      );
+      console.error("Error toggling like:", error);
+    }
+  };
 
   useEffect(() => {
     async function checkSession() {
@@ -40,6 +78,7 @@ function Profile() {
         navigate("/auth/login", { replace: true });
         return;
       }
+      setCurrentUserId(data.session.user.id);
       setIsCheckingSession(false);
     }
     checkSession();
@@ -124,7 +163,7 @@ function Profile() {
         return;
       }
 
-      const { data, error } = await supabase
+      const { data: postsData, error } = await supabase
         .from("posts_with_profiles")
         .select("id, user_id, content, image_url, created_at, username, avatar_url")
         .eq("user_id", user.id)
@@ -141,7 +180,50 @@ function Profile() {
         return;
       }
 
-      setMyPosts(data ?? []);
+      const posts = postsData ?? [];
+
+      if (posts.length === 0) {
+        setMyPosts([]);
+        setIsLoadingPosts(false);
+        return;
+      }
+
+      // Fetch likes for these posts
+      const postIds = posts.map((p) => p.id);
+      const { data: likesData, error: likesError } = await supabase
+        .from("likes")
+        .select("post_id, user_id")
+        .in("post_id", postIds);
+
+      if (likesError) {
+        console.error("Error loading likes:", likesError);
+        // Continue without likes
+        setMyPosts(posts.map((post) => ({ ...post, likeCount: 0, isLiked: false })));
+        setIsLoadingPosts(false);
+        return;
+      }
+
+      // Process likes
+      const likesMap = {};
+      likesData.forEach((like) => {
+        if (!likesMap[like.post_id]) {
+          likesMap[like.post_id] = { count: 0, likers: new Set() };
+        }
+        likesMap[like.post_id].count++;
+        likesMap[like.post_id].likers.add(like.user_id);
+      });
+
+      // Add likes to posts
+      const postsWithLikes = posts.map((post) => {
+        const likeInfo = likesMap[post.id] || { count: 0, likers: new Set() };
+        return {
+          ...post,
+          likeCount: likeInfo.count,
+          isLiked: likeInfo.likers.has(currentUserId),
+        };
+      });
+
+      setMyPosts(postsWithLikes);
       setIsLoadingPosts(false);
     }
 
@@ -150,7 +232,7 @@ function Profile() {
     return () => {
       cancelled = true;
     };
-  }, [isCheckingSession, isOtherUser]);
+  }, [isCheckingSession, isOtherUser, currentUserId]);
 
   if (isCheckingSession) {
     return (
@@ -259,10 +341,14 @@ function Profile() {
                 {myPosts.map((post) => (
                   <PostCard
                     key={post.id}
+                    postId={post.id}
                     username={post.username || profile?.username || "You"}
                     text={post.content}
                     imageUrl={post.image_url}
                     avatarUrl={post.avatar_url || profile?.avatar_url || null}
+                    likeCount={post.likeCount}
+                    isLiked={post.isLiked}
+                    onLikeToggle={handleLikeToggle}
                   />
                 ))}
               </div>
