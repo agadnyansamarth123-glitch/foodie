@@ -1,7 +1,19 @@
+import { useState, useEffect, useRef } from "react";
+import { addComment, deleteComment, getCommentsForPost } from "../services/comments";
+
 function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCount, isLiked, onLikeToggle, onDelete, currentUserId }) {
   const hasText = Boolean(text && text.trim());
   const hasImage = Boolean(imageUrl);
   const hasAvatar = Boolean(avatarUrl);
+
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState("");
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [showAllComments, setShowAllComments] = useState(false);
+  const [commentsError, setCommentsError] = useState("");
+  const commentInputRef = useRef(null);
 
   const handleLikeClick = () => {
     if (onLikeToggle) {
@@ -12,6 +24,51 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
   const handleDeleteClick = () => {
     if (onDelete) {
       onDelete(postId);
+    }
+  };
+
+  useEffect(() => {
+    async function loadComments() {
+      setIsLoadingComments(true);
+      setCommentsError("");
+      const { comments: fetchedComments, error } = await getCommentsForPost(postId);
+      if (error) {
+        console.error("Error loading comments:", error);
+        setCommentsError("Failed to load comments");
+      } else {
+        setComments(fetchedComments);
+      }
+      setIsLoadingComments(false);
+    }
+
+    loadComments();
+  }, [postId]);
+
+  const handleAddComment = async () => {
+    if (!newComment.trim() || isSubmittingComment) return;
+
+    setIsSubmittingComment(true);
+    const { success, error } = await addComment(postId, newComment.trim());
+    if (success) {
+      // Reload comments
+      const { comments: fetchedComments } = await getCommentsForPost(postId);
+      setComments(fetchedComments);
+      setNewComment("");
+    } else {
+      alert("Failed to add comment: " + error);
+    }
+    setIsSubmittingComment(false);
+  };
+
+  const handleDeleteComment = async (commentId) => {
+    const confirmed = confirm("Delete this comment?");
+    if (!confirmed) return;
+
+    const { success, error } = await deleteComment(commentId);
+    if (success) {
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } else {
+      alert("Failed to delete comment: " + error);
     }
   };
 
@@ -65,6 +122,21 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
           <span>{likeCount}</span>
         </button>
 
+        <button
+          onClick={() => {
+            setShowComments(!showComments);
+            if (!showComments) {
+              setTimeout(() => {
+                commentInputRef.current?.focus();
+              }, 100);
+            }
+          }}
+          className="flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
+        >
+          <span className="text-lg">💬</span>
+          <span>{comments.length}</span>
+        </button>
+
         {currentUserId === userId && (
           <button
             onClick={handleDeleteClick}
@@ -74,6 +146,97 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
           </button>
         )}
       </div>
+
+      {/* Comments Section */}
+      {showComments && (
+        <div className="border-t border-slate-100 px-4 py-3">
+        {isLoadingComments ? (
+          <p className="text-sm text-slate-500">Loading comments...</p>
+        ) : commentsError ? (
+          <p className="text-sm text-red-500">{commentsError}</p>
+        ) : (
+          <>
+            {/* Comments List */}
+            {comments.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {(showAllComments ? comments : comments.slice(0, 2)).map((comment) => (
+                  <div key={comment.id} className="flex items-start gap-2">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-brand-100 to-brand-200 text-xs font-bold text-brand-800">
+                      {comment.avatar_url ? (
+                        <img src={comment.avatar_url} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        comment.username.slice(0, 1).toUpperCase()
+                      )}
+                    </span>
+                    <div className="flex-1">
+                      <p className="text-sm">
+                        <span className="font-semibold text-slate-900">{comment.username}</span>{" "}
+                        <span className="text-slate-700">{comment.content}</span>
+                      </p>
+                    </div>
+                    {currentUserId === comment.user_id && (
+                      <button
+                        onClick={() => handleDeleteComment(comment.id)}
+                        className="text-xs text-slate-400 hover:text-red-600"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {/* View all comments button */}
+                {comments.length > 2 && !showAllComments && (
+                  <button
+                    onClick={() => setShowAllComments(true)}
+                    className="text-sm text-slate-500 hover:text-slate-700 font-medium"
+                  >
+                    View all {comments.length} comments
+                  </button>
+                )}
+
+                {/* Show less button */}
+                {comments.length > 2 && showAllComments && (
+                  <button
+                    onClick={() => setShowAllComments(false)}
+                    className="text-sm text-slate-500 hover:text-slate-700 font-medium"
+                  >
+                    Show less
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Add Comment Input */}
+            {currentUserId && (
+              <div className="flex gap-2">
+                <input
+                  ref={commentInputRef}
+                  type="text"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Add a comment..."
+                  className="flex-1 rounded-full border border-slate-200 px-3 py-1 text-sm focus:border-brand-500 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleAddComment();
+                    }
+                  }}
+                />
+                <button
+                  onClick={handleAddComment}
+                  disabled={!newComment.trim() || isSubmittingComment}
+                  className="rounded-full bg-brand-500 px-4 py-1 text-sm font-medium text-white transition-colors hover:bg-brand-600 disabled:opacity-50"
+                >
+                  {isSubmittingComment ? "..." : "Post"}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+        </div>
+      )}
+
     </article>
   );
 }

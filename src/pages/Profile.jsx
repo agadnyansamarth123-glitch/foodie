@@ -5,6 +5,7 @@ import { getCurrentUserProfile, getProfileByUserId } from "../services/profiles"
 import { toggleLike } from "../services/likes";
 import PostCard from "../components/PostCard";
 
+
 const MOCK_NAMES = {
   "1": "Alex",
   "2": "Sam",
@@ -30,10 +31,51 @@ function Profile() {
   const [myPosts, setMyPosts] = useState([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
   const [postsError, setPostsError] = useState("");
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [selectedPost, setSelectedPost] = useState(null);
 
   const isOtherUser = Boolean(id);
   const isUuidParam = isOtherUser && isUuid(id);
   const isDemoStoryId = isOtherUser && !isUuidParam;
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/auth/login");
+  };
+
+  const handleDeletePost = async (postId) => {
+    const confirmed = window.confirm("Are you sure you want to delete this post?");
+    if (!confirmed) return;
+    
+    const { error } = await supabase.from("posts").delete().eq("id", postId);
+    if (!error) {
+      setMyPosts(prev => prev.filter(p => p.id !== postId));
+      setSelectedPost(null);
+    } else {
+      console.error(error);
+      alert("Failed to delete post.");
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm("Are you sure? This will delete your data");
+    if (!confirmed) return;
+
+    setIsDeletingAccount(true);
+    try {
+      await supabase.from("comments").delete().eq("user_id", currentUserId);
+      await supabase.from("posts").delete().eq("user_id", currentUserId);
+      await supabase.from("profiles").delete().eq("id", currentUserId);
+      
+      await supabase.auth.signOut();
+      navigate("/auth/login");
+    } catch (e) {
+      console.error(e);
+      alert("Error deleting account");
+      setIsDeletingAccount(false);
+    }
+  };
 
   const handleLikeToggle = async (postId) => {
     if (!currentUserId) return;
@@ -254,8 +296,16 @@ function Profile() {
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10">
-      <div className="mx-auto w-full max-w-xl space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+      <div className="mx-auto w-full max-w-4xl space-y-6">
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        {!isOtherUser && (
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="absolute top-4 right-4 text-slate-500 hover:text-slate-700 transition"
+          >
+            ⚙️ Settings
+          </button>
+        )}
         {isLoadingProfile ? (
           <p className="text-sm text-slate-600">Loading...</p>
         ) : loadError ? (
@@ -320,10 +370,17 @@ function Profile() {
 
         {!isOtherUser ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold text-slate-900">Your posts</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Posts you created from FoodGuard.
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-left text-base font-semibold text-slate-900">Your posts</h2>
+                <p className="mt-1 text-left text-sm text-slate-600">
+                  Posts you created from FoodGuard.
+                </p>
+              </div>
+              <div className="text-sm font-medium text-slate-700 bg-slate-100 px-3 py-1 rounded-full">
+                Posts: {isLoadingPosts ? "..." : myPosts.length}
+              </div>
+            </div>
 
             {isLoadingPosts ? (
               <p className="mt-6 text-center text-sm text-slate-600">
@@ -337,25 +394,97 @@ function Profile() {
                 <span className="font-medium">+</span> button on the home feed.
               </div>
             ) : (
-              <div className="mt-6 space-y-4">
+              <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-4">
                 {myPosts.map((post) => (
-                  <PostCard
-                    key={post.id}
-                    postId={post.id}
-                    username={post.username || profile?.username || "You"}
-                    text={post.content}
-                    imageUrl={post.image_url}
-                    avatarUrl={post.avatar_url || profile?.avatar_url || null}
-                    likeCount={post.likeCount}
-                    isLiked={post.isLiked}
-                    onLikeToggle={handleLikeToggle}
-                  />
+                  <div 
+                    key={post.id} 
+                    className="group relative h-56 rounded-xl border border-slate-200 overflow-hidden bg-white shadow-sm transition-all duration-300 hover:scale-105 hover:shadow-md cursor-pointer"
+                    onClick={() => setSelectedPost(post)}
+                  >
+                    {post.image_url ? (
+                      <img src={post.image_url} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full p-5">
+                        <p className="line-clamp-2 break-words text-sm text-slate-700 w-full">
+                          {post.content || "No content"}
+                        </p>
+                      </div>
+                    )}
+                    <div className="absolute inset-0 hidden items-center justify-center bg-black/40 transition-all duration-300 group-hover:flex">
+                      <span className="font-semibold text-white">View Post</span>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
           </section>
         ) : null}
       </div>
+
+      {selectedPost && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setSelectedPost(null)}
+        >
+          <div 
+            className="relative w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button 
+              className="absolute -top-10 right-0 text-xl font-bold text-white hover:text-slate-300 transition-colors"
+              onClick={() => setSelectedPost(null)}
+            >
+              ✕
+            </button>
+            <div className="max-h-[85vh] overflow-y-auto rounded-2xl bg-white shadow-2xl hide-scrollbar">
+              <PostCard
+                postId={selectedPost.id}
+                username={selectedPost.username || profile?.username || "You"}
+                text={selectedPost.content}
+                imageUrl={selectedPost.image_url}
+                avatarUrl={selectedPost.avatar_url || profile?.avatar_url || null}
+                likeCount={selectedPost.likeCount}
+                isLiked={selectedPost.isLiked}
+                onLikeToggle={handleLikeToggle}
+                currentUserId={currentUserId}
+                userId={selectedPost.user_id}
+                onDelete={handleDeletePost}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">Settings</h3>
+              <button 
+                onClick={() => setShowSettingsModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={handleLogout}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Logout
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={isDeletingAccount}
+                className="w-full rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+              >
+                {isDeletingAccount ? "Deleting..." : "Delete Account"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
