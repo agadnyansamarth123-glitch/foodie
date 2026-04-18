@@ -79,3 +79,26 @@ export async function getFollowCounts(userId) {
     following: followingCount || 0,
   };
 }
+
+export async function getFollowingUsers() {
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData?.user) return { data: [], error: "Not authenticated" };
+
+  const { data: follows, error: followsError } = await supabase
+    .from("follows")
+    .select("following_id")
+    .eq("follower_id", authData.user.id);
+    
+  if (followsError || !follows || follows.length === 0) return { data: [] };
+
+  const followingIds = follows.map(f => f.following_id);
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from("profiles")
+    .select("id, username, avatar_url")
+    .in("id", followingIds);
+    
+  if (profilesError) return { data: [], error: profilesError };
+  
+  return { data: profiles };
+}

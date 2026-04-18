@@ -1,15 +1,20 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-const OTHER_USERS = [
-  { id: "1", label: "Alex", color: "from-emerald-400 to-teal-500" },
-  { id: "2", label: "Sam", color: "from-sky-400 to-blue-500" },
-  { id: "3", label: "Jordan", color: "from-amber-400 to-orange-500" },
-  { id: "4", label: "Riley", color: "from-lime-500 to-green-600" },
-  { id: "5", label: "Casey", color: "from-slate-400 to-slate-600" },
-];
+import { getFollowingUsers } from "../services/follows";
 
 function StoryBar() {
   const navigate = useNavigate();
+  const [following, setFollowing] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchStories() {
+      const { data } = await getFollowingUsers();
+      if (data) setFollowing(data);
+      setIsLoading(false);
+    }
+    fetchStories();
+  }, []);
 
   return (
     <div className="border-b border-slate-100 bg-white/80">
@@ -30,25 +35,33 @@ function StoryBar() {
             </span>
           </button>
 
-          {OTHER_USERS.map((user) => (
-            <button
-              key={user.id}
-              type="button"
-              onClick={() => navigate(`/profile/${user.id}`)}
-              className="flex shrink-0 flex-col items-center gap-1.5"
-            >
-              <span
-                className={`flex h-[68px] w-[68px] items-center justify-center rounded-full bg-gradient-to-br ${user.color} p-[2px] shadow-sm ring-2 ring-white`}
+          {!isLoading && following.length === 0 ? (
+            <div className="flex h-[68px] items-center px-4">
+              <span className="text-xs text-slate-500">Follow users to see their stories</span>
+            </div>
+          ) : (
+            following.map((user) => (
+              <button
+                key={user.id}
+                type="button"
+                onClick={() => navigate(`/profile/${user.id}`)}
+                className="flex shrink-0 flex-col items-center gap-1.5"
               >
-                <span className="flex h-full w-full items-center justify-center rounded-full bg-white text-sm font-bold text-slate-700">
-                  {user.label.slice(0, 1)}
+                <span className="flex h-[68px] w-[68px] items-center justify-center rounded-full bg-gradient-to-br from-brand-100 to-brand-200 p-[2px] shadow-sm ring-2 ring-white overflow-hidden">
+                  {user.avatar_url ? (
+                    <img src={user.avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center rounded-full bg-white text-lg font-bold text-slate-700">
+                      {user.username?.slice(0, 1).toUpperCase() || "?"}
+                    </span>
+                  )}
                 </span>
-              </span>
-              <span className="max-w-[72px] truncate text-center text-[11px] font-medium text-slate-600">
-                {user.label}
-              </span>
-            </button>
-          ))}
+                <span className="max-w-[72px] truncate text-center text-[11px] font-medium text-slate-600">
+                  {user.username}
+                </span>
+              </button>
+            ))
+          )}
         </div>
       </div>
     </div>

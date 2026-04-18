@@ -41,6 +41,14 @@ function Profile() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowLoading, setIsFollowLoading] = useState(false);
 
+  const [editBio, setEditBio] = useState("");
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (profile) setEditBio(profile.bio || "");
+  }, [profile]);
+
   const isOtherUser = Boolean(id);
   const isUuidParam = isOtherUser && isUuid(id);
   const isDemoStoryId = isOtherUser && !isUuidParam;
@@ -48,6 +56,86 @@ function Profile() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate("/auth/login");
+  };
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Log the file for debug visibility
+    console.log("Attempting to upload file:", file.name, file.type, file.size);
+
+    setIsUploadingAvatar(true);
+    const fileExt = file.name.split('.').pop();
+    const timestamp = new Date().getTime();
+    const fileName = `${currentUserId}-${timestamp}.${fileExt}`;
+
+    try {
+      // 1. Verify Authentication
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) {
+        throw new Error("User not authenticated for upload");
+      }
+
+      // 2. Execute Upload
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, {
+           upsert: true
+        });
+
+      if (uploadError) {
+        console.error("Supabase Storage Upload Error:", uploadError);
+        throw uploadError;
+      }
+      
+      console.log("Upload Success Data:", uploadData);
+
+      // 3. Fetch public URL
+      const { data: publicUrlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      const avatar_url = publicUrlData.publicUrl;
+      console.log("Generated Final URL:", avatar_url);
+
+      // 4. Map back to database
+      const { error: dbError } = await supabase
+        .from("profiles")
+        .update({ avatar_url })
+        .eq("id", currentUserId);
+
+      if (dbError) {
+        console.error("Profile Database Update Error:", dbError);
+        throw dbError;
+      }
+        
+      setProfile((prev) => ({ ...prev, avatar_url }));
+    } catch (error) {
+      console.error("Full Upload Crash Trace:", error);
+      alert("Error uploading avatar. Check console logs for details.");
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleSaveBio = async () => {
+    setIsSavingProfile(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ bio: editBio })
+        .eq("id", currentUserId);
+
+      if (error) throw error;
+      
+      setProfile((prev) => ({ ...prev, bio: editBio }));
+    } catch (error) {
+      console.error(error);
+      alert("Error saving bio");
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const handleDeletePost = async (postId) => {
@@ -523,8 +611,8 @@ function Profile() {
       )}
 
       {showSettingsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowSettingsModal(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="mb-6 flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">Settings</h3>
               <button 
@@ -534,7 +622,53 @@ function Profile() {
                 ✕
               </button>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-4">
+              
+              {!isOtherUser && (
+                <>
+                  <div className="flex flex-col items-center border-b border-slate-100 pb-4">
+                    <div className="h-20 w-20 rounded-full overflow-hidden bg-slate-100 mb-3 border-2 border-brand-100">
+                      {profile?.avatar_url ? (
+                        <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center text-3xl font-bold text-brand-700">
+                          {profile?.username?.charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <label className="cursor-pointer text-sm font-semibold text-brand-600 hover:text-brand-700">
+                      {isUploadingAvatar ? "Uploading..." : "Change Profile Photo"}
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={handleAvatarUpload}
+                        disabled={isUploadingAvatar}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Edit Bio</label>
+                    <textarea
+                      className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm focus:border-brand-500 focus:outline-none min-h-[80px]"
+                      value={editBio}
+                      onChange={(e) => setEditBio(e.target.value)}
+                      placeholder="Write a short bio..."
+                    />
+                    <button
+                      onClick={handleSaveBio}
+                      disabled={isSavingProfile || isUploadingAvatar}
+                      className="mt-2 w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {isSavingProfile ? "Saving..." : "Save Bio"}
+                    </button>
+                  </div>
+                  
+                  <div className="pt-2"></div>
+                </>
+              )}
+
               <button
                 onClick={handleLogout}
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
