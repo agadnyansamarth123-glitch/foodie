@@ -4,6 +4,7 @@ import supabase from "../services/supabase";
 import { getCurrentUserProfile, getProfileByUserId } from "../services/profiles";
 import { toggleLike } from "../services/likes";
 import PostCard from "../components/PostCard";
+import { followUser, unfollowUser, getFollowState, getFollowCounts } from "../services/follows";
 
 
 const MOCK_NAMES = {
@@ -34,6 +35,11 @@ function Profile() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
+
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowLoading, setIsFollowLoading] = useState(false);
 
   const isOtherUser = Boolean(id);
   const isUuidParam = isOtherUser && isUuid(id);
@@ -75,6 +81,21 @@ function Profile() {
       alert("Error deleting account");
       setIsDeletingAccount(false);
     }
+  };
+
+  const handleFollowToggle = async () => {
+    if (!profile) return;
+    setIsFollowLoading(true);
+    if (isFollowing) {
+      await unfollowUser(profile.id);
+      setIsFollowing(false);
+      setFollowersCount(c => c - 1);
+    } else {
+      await followUser(profile.id);
+      setIsFollowing(true);
+      setFollowersCount(c => c + 1);
+    }
+    setIsFollowLoading(false);
   };
 
   const handleLikeToggle = async (postId) => {
@@ -153,6 +174,11 @@ function Profile() {
           setProfile(null);
         } else {
           setProfile(row);
+          if (row) {
+            const counts = await getFollowCounts(row.id);
+            setFollowersCount(counts.followers);
+            setFollowingCount(counts.following);
+          }
         }
         setIsLoadingProfile(false);
         return;
@@ -167,6 +193,18 @@ function Profile() {
         setProfile(null);
       } else {
         setProfile(row);
+        if (row) {
+          const counts = await getFollowCounts(row.id);
+          setFollowersCount(counts.followers);
+          setFollowingCount(counts.following);
+
+          // Check if current user is following this profile
+          const { data: authData } = await supabase.auth.getUser();
+          if (authData?.user) {
+            const following = await getFollowState(authData.user.id, row.id);
+            setIsFollowing(following);
+          }
+        }
       }
       setIsLoadingProfile(false);
     }
@@ -179,7 +217,7 @@ function Profile() {
   }, [isCheckingSession, isOtherUser, isDemoStoryId, id]);
 
   useEffect(() => {
-    if (isCheckingSession || isOtherUser) {
+    if (isCheckingSession) {
       return;
     }
 
@@ -205,10 +243,12 @@ function Profile() {
         return;
       }
 
+      const targetUserId = isOtherUser ? id : user.id;
+
       const { data: postsData, error } = await supabase
         .from("posts_with_profiles")
         .select("id, user_id, content, image_url, created_at, username, avatar_url")
-        .eq("user_id", user.id)
+        .eq("user_id", targetUserId)
         .order("created_at", { ascending: false });
 
       if (cancelled) {
@@ -342,6 +382,33 @@ function Profile() {
               )}
             </div>
             <h1 className="mt-4 text-2xl font-bold text-slate-900">{profile.username}</h1>
+
+            <div className="mt-3 flex justify-center gap-6 text-sm">
+               <div className="flex flex-col items-center">
+                 <span className="font-bold text-slate-900">{followersCount}</span>
+                 <span className="text-slate-500">Followers</span>
+               </div>
+               <div className="flex flex-col items-center">
+                 <span className="font-bold text-slate-900">{followingCount}</span>
+                 <span className="text-slate-500">Following</span>
+               </div>
+            </div>
+
+            {isOtherUser && currentUserId && (
+              <div className="mt-5 flex justify-center">
+                <button
+                  onClick={handleFollowToggle}
+                  disabled={isFollowLoading}
+                  className={`rounded-full px-8 py-2 text-sm font-semibold transition ${
+                    isFollowing 
+                      ? "bg-slate-100 text-slate-700 hover:bg-slate-200" 
+                      : "bg-brand-600 text-white hover:bg-brand-700"
+                  } disabled:opacity-50`}
+                >
+                  {isFollowLoading ? "..." : isFollowing ? "Following" : "Follow"}
+                </button>
+              </div>
+            )}
             {profile.bio?.trim() ? (
               <p className="mt-4 text-left text-sm leading-relaxed text-slate-600">
                 {profile.bio.trim()}
@@ -368,15 +435,16 @@ function Profile() {
         </div>
         </div>
 
-        {!isOtherUser ? (
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-left text-base font-semibold text-slate-900">Your posts</h2>
-                <p className="mt-1 text-left text-sm text-slate-600">
-                  Posts you created from FoodGuard.
-                </p>
-              </div>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-left text-base font-semibold text-slate-900">
+                {!isOtherUser ? "Your posts" : `${profile?.username || 'User'}'s posts`}
+              </h2>
+              <p className="mt-1 text-left text-sm text-slate-600">
+                {!isOtherUser ? "Posts you created from FoodGuard." : "Recent posts from this user."}
+              </p>
+            </div>
               <div className="text-sm font-medium text-slate-700 bg-slate-100 px-3 py-1 rounded-full">
                 Posts: {isLoadingPosts ? "..." : myPosts.length}
               </div>
@@ -418,7 +486,6 @@ function Profile() {
               </div>
             )}
           </section>
-        ) : null}
       </div>
 
       {selectedPost && (

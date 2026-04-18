@@ -1,12 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { addComment, deleteComment, getCommentsForPost } from "../services/comments";
+import supabase from "../services/supabase";
 
 function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCount, isLiked, onLikeToggle, onDelete, currentUserId }) {
-  const hasText = Boolean(text && text.trim());
+  const [currentText, setCurrentText] = useState(text || "");
+  const hasText = Boolean(currentText && currentText.trim());
   const hasImage = Boolean(imageUrl);
   const hasAvatar = Boolean(avatarUrl);
 
   const [comments, setComments] = useState([]);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
@@ -22,9 +28,12 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
   };
 
   const handleDeleteClick = () => {
+    const confirmed = confirm("Are you sure? This will delete your post");
+    if (!confirmed) return;
     if (onDelete) {
       onDelete(postId);
     }
+    setShowMenu(false);
   };
 
   useEffect(() => {
@@ -83,6 +92,37 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
           )}
         </span>
         <p className="font-semibold text-slate-900">{username}</p>
+
+        {currentUserId === userId && (
+          <div className="relative ml-auto">
+            <button 
+              onClick={() => setShowMenu(!showMenu)}
+              className="text-slate-500 hover:text-slate-700 px-2 py-1 text-xl leading-none"
+            >
+              ⋯
+            </button>
+            {showMenu && (
+              <div className="absolute right-0 top-full mt-1 w-32 rounded-lg bg-white border border-slate-200 shadow-lg z-10 py-1">
+                <button 
+                  onClick={() => {
+                    setShowMenu(false);
+                    setShowEditModal(true);
+                    setEditText(currentText);
+                  }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  Edit Post
+                </button>
+                <button 
+                  onClick={handleDeleteClick}
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                >
+                  Delete Post
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {hasImage ? (
@@ -98,7 +138,7 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
       {hasText ? (
         <div className="px-4 py-3">
           <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-slate-800">
-            {text}
+            {currentText}
           </p>
         </div>
       ) : null}
@@ -136,15 +176,6 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
           <span className="text-lg">💬</span>
           <span>{comments.length}</span>
         </button>
-
-        {currentUserId === userId && (
-          <button
-            onClick={handleDeleteClick}
-            className="flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600 transition-colors hover:bg-red-100"
-          >
-            Delete
-          </button>
-        )}
       </div>
 
       {/* Comments Section */}
@@ -234,6 +265,59 @@ function PostCard({ username, text, imageUrl, avatarUrl, postId, userId, likeCou
             )}
           </>
         )}
+        </div>
+      )}
+
+      {showEditModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setShowEditModal(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">Edit Post</h3>
+              <button 
+                onClick={() => setShowEditModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <textarea
+              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm focus:border-brand-500 focus:outline-none min-h-[120px]"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              placeholder="Write your post..."
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="rounded-full px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!editText.trim() && !hasImage) return; // don't allow totally empty text if no image
+                  setIsSaving(true);
+                  const { error } = await supabase
+                    .from("posts")
+                    .update({ content: editText.trim() })
+                    .eq("id", postId);
+                  
+                  if (!error) {
+                    setCurrentText(editText.trim());
+                    setShowEditModal(false);
+                  } else {
+                    alert("Failed to update post");
+                    console.error(error);
+                  }
+                  setIsSaving(false);
+                }}
+                disabled={isSaving}
+                className="rounded-full bg-brand-600 px-6 py-2 text-sm font-medium text-white transition hover:bg-brand-700 disabled:opacity-50"
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

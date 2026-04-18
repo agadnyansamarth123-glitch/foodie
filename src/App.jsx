@@ -7,6 +7,7 @@ import Signup from "./pages/Signup";
 import Scanner from "./pages/Scanner";
 import Suggestions from "./pages/Suggestions";
 import CreatePost from "./pages/CreatePost";
+import Search from "./pages/Search";
 import EntryRedirect from "./components/EntryRedirect";
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
         <Route path="/scanner" element={<Scanner />} />
         <Route path="/suggestions" element={<Suggestions />} />
         <Route path="/create-post" element={<CreatePost />} />
+        <Route path="/search" element={<Search />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
